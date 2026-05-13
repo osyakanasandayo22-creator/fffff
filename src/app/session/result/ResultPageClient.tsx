@@ -38,7 +38,8 @@ export default function ResultPageClient() {
   }
 
   const { problem, userAnswer, grade } = ctx;
-  const policy = normalizeMultiline(problem.canonicalPolicy);
+  const policy = normalizeMultiline(problem.canonicalPolicy ?? "");
+  const official = (problem.officialAnswerText ?? "").trim();
 
   function goNext() {
     const s = readSession();
@@ -87,9 +88,20 @@ export default function ResultPageClient() {
             正解の方針解答（ルーブリック）
           </h3>
           <pre className="fg-serif mt-2 whitespace-pre-wrap text-sm leading-relaxed text-fg-ink">
-            {policy}
+            {policy || "（ルーブリックがありません）"}
           </pre>
         </section>
+
+        {official ? (
+          <section className="fg-card p-6 sm:p-8">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-ink-soft">
+              Focus Gold 解答（PDF 抽出テキスト）
+            </h3>
+            <pre className="fg-serif mt-2 max-h-[480px] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-fg-ink">
+              {official}
+            </pre>
+          </section>
+        ) : null}
 
         <section className="fg-card p-6 sm:p-8">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-ink-soft">
@@ -112,7 +124,7 @@ export default function ResultPageClient() {
             Focus Gold の解答（PDF）
           </h3>
           <p className="mt-2 text-sm text-fg-ink-soft">
-            Vol.{problem.vol} の約 {problem.answerPdfPage} ページ目付近を開きます（データ整備後にページを精緻化できます）。
+            Vol.{problem.vol} の {problem.answerPdfPage} ページ目付近を開きます（書籍 PDF）。
           </p>
           <div className="mt-4 overflow-hidden rounded-lg border border-fg-muted">
             <iframe title="Focus Gold PDF" src={pdfHref} className="h-[520px] w-full bg-white" />

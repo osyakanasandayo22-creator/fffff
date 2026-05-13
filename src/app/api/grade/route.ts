@@ -5,6 +5,7 @@ import {
 } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import type { GradeResult } from "@/lib/types";
+import { getProblemFullFromDisk } from "@/server/problems-full";
 
 export const runtime = "nodejs";
 /** Vercel のサーバーレスが先に切らないよう余裕を持たせる */
@@ -200,21 +201,49 @@ export async function POST(req: Request) {
   }
 
   const b = body as {
+    problemId?: string;
+    userAnswer?: string;
     predictedProblemText?: string;
     canonicalPolicy?: string;
-    userAnswer?: string;
   };
 
-  const predictedProblemText = (b.predictedProblemText ?? "").trim();
-  const canonicalPolicy = (b.canonicalPolicy ?? "").trim();
+  let predictedProblemText: string;
+  let canonicalPolicy: string;
+  let officialSnippet = "";
+
+  if (b.problemId?.trim()) {
+    const p = getProblemFullFromDisk(b.problemId.trim());
+    if (!p?.canonicalPolicy) {
+      return NextResponse.json(
+        { error: "問題データが見つかりません", detail: b.problemId },
+        { status: 400 },
+      );
+    }
+    predictedProblemText = (p.predictedProblemText ?? "").trim();
+    canonicalPolicy = p.canonicalPolicy.trim();
+    officialSnippet = (p.officialAnswerText ?? "").trim().slice(0, 6000);
+  } else {
+    predictedProblemText = (b.predictedProblemText ?? "").trim();
+    canonicalPolicy = (b.canonicalPolicy ?? "").trim();
+  }
+
   const userAnswer = (b.userAnswer ?? "").trim();
 
   if (!canonicalPolicy || !userAnswer) {
     return NextResponse.json(
-      { error: "canonicalPolicy と userAnswer は必須です" },
+      { error: "problemId と userAnswer、または canonicalPolicy と userAnswer が必要です" },
       { status: 400 },
     );
   }
+
+  const officialBlock =
+    officialSnippet.length > 0
+      ? `
+
+【Focus Gold 公式解答テキスト（抜粋・PDF 抽出）】
+${officialSnippet}
+`
+      : "";
 
   const prompt = `あなたは数学の「方針解答」の採点者です。以下のルーブリック（正解方針の本質項目と到達過程）に照らし、ユーザーの回答が本質を捉えているか、文章として破綻がないかを評価してください。
 
@@ -223,6 +252,7 @@ ${predictedProblemText || "（なし）"}
 
 【ルーブリック（正解方針・採点基準）】
 ${canonicalPolicy}
+${officialBlock}
 
 【ユーザーの方針回答】
 ${userAnswer}

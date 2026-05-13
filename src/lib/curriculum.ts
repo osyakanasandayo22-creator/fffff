@@ -1,4 +1,4 @@
-import raw from "@/data/problems.json";
+import raw from "@/data/problems.meta.json";
 import type { Problem } from "@/lib/types";
 
 const problems: Problem[] = raw.problems as Problem[];

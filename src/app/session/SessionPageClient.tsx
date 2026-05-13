@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { getProblemById } from "@/lib/curriculum";
 import { readSession, writeGradeContext } from "@/lib/session-storage";
-import type { GradeResult } from "@/lib/types";
+import type { GradeResult, Problem } from "@/lib/types";
 
 export default function SessionPageClient() {
   const router = useRouter();
@@ -21,10 +21,10 @@ export default function SessionPageClient() {
   }, [session, router]);
 
   const problemId = session?.queue[session?.index ?? 0];
-  const problem = problemId ? getProblemById(problemId) : undefined;
+  const meta = problemId ? getProblemById(problemId) : undefined;
 
   async function handleGrade() {
-    if (!problem) return;
+    if (!problemId || !meta) return;
     const trimmed = answer.trim();
     if (!trimmed) {
       setError("方針を入力してください。");
@@ -33,12 +33,20 @@ export default function SessionPageClient() {
     setError(null);
     setLoading(true);
     try {
+      const pr = await fetch(`/api/problem?id=${encodeURIComponent(problemId)}`);
+      const fullProblem = (await pr.json()) as Problem & { error?: string };
+      if (!pr.ok) {
+        throw new Error(fullProblem.error ?? `問題の取得に失敗しました (${pr.status})`);
+      }
+      if (!fullProblem.canonicalPolicy) {
+        throw new Error("問題データにルーブリックがありません");
+      }
+
       const res = await fetch("/api/grade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          predictedProblemText: problem.predictedProblemText,
-          canonicalPolicy: problem.canonicalPolicy,
+          problemId,
           userAnswer: trimmed,
         }),
       });
@@ -57,7 +65,7 @@ export default function SessionPageClient() {
       if (!data.grade) throw new Error("採点結果が空です");
       writeGradeContext({
         version: 1,
-        problem,
+        problem: fullProblem,
         userAnswer: trimmed,
         grade: data.grade,
       });
@@ -69,7 +77,7 @@ export default function SessionPageClient() {
     }
   }
 
-  if (!session || session.queue.length === 0 || !problem) {
+  if (!session || session.queue.length === 0 || !meta) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-fg-muted">
         読み込み中…
@@ -84,7 +92,7 @@ export default function SessionPageClient() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-center justify-between text-xs text-fg-muted/90">
           <span>
-            Vol.{problem.vol} 問{problem.indexInVol}
+            Vol.{meta.vol} 問{meta.indexInVol}
           </span>
           <span>{pos}</span>
         </div>
@@ -94,7 +102,7 @@ export default function SessionPageClient() {
             問題文
           </h2>
           <p className="fg-serif mt-3 whitespace-pre-wrap text-base leading-relaxed text-fg-ink">
-            {problem.predictedProblemText}
+            {meta.predictedProblemText}
           </p>
         </section>
 

@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --fg-deep: #0b1f3a;
+  --fg-deep-2: #0d2847;
+  --fg-surface: #ffffff;
+  --fg-muted: #e8eef7;
+  --fg-ink: #0b1f3a;
+  --fg-ink-soft: #3d4f6a;
+}
+
+@theme inline {
+  --color-fg-deep: var(--fg-deep);
+  --color-fg-deep-2: var(--fg-deep-2);
+  --color-fg-surface: var(--fg-surface);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-ink: var(--fg-ink);
+  --color-fg-ink-soft: var(--fg-ink-soft);
+  --font-serif: var(--font-shippori);
+  --font-sans: var(--font-noto-sans);
+}
+
+body {
+  background: linear-gradient(180deg, var(--fg-deep) 0%, var(--fg-deep-2) 100%);
+  color: var(--fg-muted);
+  font-family: var(--font-noto-sans), system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+.fg-serif {
+  font-family: var(--font-shippori), "Hiragino Mincho ProN", serif;
+}
+
+.fg-card {
+  background: var(--fg-surface);
+  color: var(--fg-ink);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+}
+
+.fg-input {
+  border: 1px solid #c9d4e8;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  color: var(--fg-ink);
+  background: #fff;
+}
+
+.fg-input:focus {
+  outline: 2px solid #1e4a8a;
+  outline-offset: 1px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.icon-btn:hover {
+  background: #f3f6fb;
+}
+
+.icon-btn:active {
+  transform: translateY(1px);
+}

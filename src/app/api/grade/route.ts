@@ -1,35 +1,107 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  HarmBlockThreshold,
+  HarmCategory,
+} from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import type { GradeResult } from "@/lib/types";
 
 export const runtime = "nodejs";
+/** Vercel のサーバーレスが先に切らないよう余裕を持たせる */
+export const maxDuration = 60;
 
 const DEFAULT_MODEL = "gemini-3.1-flash-lite-preview";
+
+/** 数学採点で誤ブロックされやすいカテゴリを緩める */
+const GRADE_SAFETY_SETTINGS = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+].map((category) => ({
+  category,
+  threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+}));
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 function errText(e: unknown): string {
+  if (e && typeof e === "object" && "status" in e) {
+    const fe = e as { message?: string; status?: number; statusText?: string; errorDetails?: unknown };
+    const parts = [
+      fe.message,
+      fe.status != null ? `HTTP ${fe.status}${fe.statusText ? ` ${fe.statusText}` : ""}` : "",
+      fe.errorDetails != null ? `details: ${JSON.stringify(fe.errorDetails)}` : "",
+    ].filter(Boolean);
+    if (parts.length) return parts.join(" | ");
+  }
   if (e instanceof Error) return e.message;
   return String(e);
 }
 
-function extractJsonObject(raw: string): string {
+/**
+ * 先頭の `{` から対応する `}` までを括弧深度で切り出す（文字列内の `{}` は無視）。
+ * `lastIndexOf("}")` だと analysis 内の `}` で誤判定しやすい。
+ */
+function extractFirstJsonObject(raw: string): string {
   let s = raw.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
+
   const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("モデル出力から JSON オブジェクトを検出できませんでした");
+  if (start === -1) {
+    throw new Error("モデル出力に `{` がありません。先頭200文字: " + s.slice(0, 200));
   }
-  return s.slice(start, end + 1);
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+
+  throw new Error("モデル出力から閉じた JSON オブジェクトを切り出せませんでした。先頭400文字: " + s.slice(0, 400));
 }
 
 function parseGradeResult(text: string): GradeResult {
-  const jsonStr = extractJsonObject(text);
-  const parsed = JSON.parse(jsonStr) as Partial<GradeResult>;
+  let jsonStr: string;
+  try {
+    jsonStr = extractFirstJsonObject(text);
+  } catch (e) {
+    throw new Error(errText(e));
+  }
+  let parsed: Partial<GradeResult>;
+  try {
+    parsed = JSON.parse(jsonStr) as Partial<GradeResult>;
+  } catch (e) {
+    throw new Error(
+      `JSON.parse 失敗: ${errText(e)} | 切り出し先頭200文字: ${jsonStr.slice(0, 200)}`,
+    );
+  }
+
   const score = typeof parsed.score === "number" ? Math.max(0, Math.min(10, parsed.score)) : 0;
   const maxScore =
     typeof parsed.maxScore === "number" ? Math.max(1, Math.min(10, parsed.maxScore)) : 10;
@@ -76,9 +148,13 @@ const gradeSchemaHint = `{
   "rubricHits": { "キー": boolean }
 }`;
 
+function normalizeModelId(name: string): string {
+  return name.replace(/^models\//, "").trim();
+}
+
 /**
- * gemini-3.1-flash-lite-preview 等では responseMimeType: application/json が
- * 未対応・不安定なことがあるため、通常のテキスト生成のみ行い JSON はプロンプトで指示してパースする。
+ * responseMimeType はプレビュー系モデルで失敗することがあるため使わず、
+ * プレーンテキストで JSON を返させてパースする。
  */
 async function generateGradeRawText(
   genAI: GoogleGenerativeAI,
@@ -86,9 +162,11 @@ async function generateGradeRawText(
   prompt: string,
 ): Promise<string> {
   const model = genAI.getGenerativeModel({
-    model: modelName,
+    model: normalizeModelId(modelName),
+    safetySettings: GRADE_SAFETY_SETTINGS,
     generationConfig: {
       temperature: 0.2,
+      maxOutputTokens: 8192,
     },
   });
   const res = await withRetries(() => model.generateContent(prompt));
@@ -156,8 +234,10 @@ ${userAnswer}
 - points は短い箇条書き（日本語）で良い点/改善点を2〜5件。
 - analysis は2〜4文の日本語で総評。
 
-## 出力形式
-次のキーだけを持つ JSON オブジェクトを 1 つだけ返してください（前後に説明文や Markdown を付けないでください）。
+## 出力形式（厳守）
+- 次のキーだけを持つ JSON オブジェクトを 1 つだけ出力すること。
+- 前後に説明文・Markdown・コードフェンスを付けないこと。
+- 文字列は必ず二重引用符で囲むこと（JSON として有効な形式）。
 ${gradeSchemaHint}`;
 
   const modelName =
@@ -174,7 +254,7 @@ ${gradeSchemaHint}`;
       {
         error: "採点 API でエラーが発生しました",
         detail: message,
-        model: modelName,
+        model: normalizeModelId(modelName),
       },
       { status: 502 },
     );

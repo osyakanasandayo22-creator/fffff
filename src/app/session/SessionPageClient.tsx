@@ -42,9 +42,17 @@ export default function SessionPageClient() {
           userAnswer: trimmed,
         }),
       });
-      const data = (await res.json()) as { grade?: GradeResult; error?: string; detail?: string };
+      const data = (await res.json()) as {
+        grade?: GradeResult;
+        error?: string;
+        detail?: string;
+        model?: string;
+      };
       if (!res.ok) {
-        throw new Error(data.error ?? data.detail ?? "採点に失敗しました");
+        const parts = [data.error, data.detail, data.model ? `model: ${data.model}` : ""].filter(
+          Boolean,
+        );
+        throw new Error(parts.join(" — ") || "採点に失敗しました");
       }
       if (!data.grade) throw new Error("採点結果が空です");
       writeGradeContext({
